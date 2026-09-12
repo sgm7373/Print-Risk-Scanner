@@ -111,4 +111,10 @@ just geometry, and running a proper design of experiments across print
 orientation and support density to see which variables move the risk
 score the most.
 
-## - Built by Sourabh More
+
+---
+
+## Author
+
+**Sourabh Gopinath More**
+MS Computer Science [LinkedIn](https://www.linkedin.com/in/sourabhmore73/) | [Portfolio](https://sourabhmore.carrd.co/) | [GitHub](https://github.com/sgm7373)
