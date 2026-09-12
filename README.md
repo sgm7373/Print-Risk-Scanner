@@ -1,73 +1,112 @@
 # Print Risk Scanner
 
-A tool that looks at a 3D model before it gets printed and predicts where
-on that model a print is likely to fail.
+## Objective
 
-It works by slicing the mesh into thin horizontal layers, the same way a
-3D printer would build the part up layer by layer, then checking each
-layer against two things that are known to cause real print failures:
+Predict where a 3D printed part is likely to fail, before it is ever
+printed, by analyzing the geometry alone. Print failures in layer based
+manufacturing are not random, they tend to happen at specific geometric
+features. This project encodes two of those known failure triggers into
+a repeatable, automated check that runs on any mesh.
 
-1. A sudden jump in cross section area from the layer right below it.
-   A small layer suddenly having to support a much bigger one above it
-   is a common cause of layers separating from each other.
-2. Outward growth with nothing supporting it underneath. An unsupported
-   overhang is one of the most common reasons a print sags or warps
-   during the build.
+## Background
 
-Both checks are combined into a single risk score per layer, and that
-score gets painted directly onto the 3D shape so you can see exactly
-where the danger zones are before committing to a print.
+In layer based 3D printing, a part is built one thin horizontal slice at
+a time. Two geometric conditions are well known causes of failed prints:
 
-## Why I built this
+1. **Cross sectional area jump.** When one layer's cross section is
+   much larger than the layer directly beneath it, the new layer is
+   poorly supported and bonded to less material than it needs. This is
+   a documented cause of layers separating from each other during or
+   after printing.
+2. **Unsupported overhang.** When a layer extends outward with no
+   material underneath it, that section has nothing holding it in place
+   during the build, which is a common cause of sagging and warping.
 
-Most print failures do not show up randomly, they show up at specific
-geometric features, a thin neck feeding into something wide, an arm
-sticking out with no support below it, a sudden change in the shape of
-the part. I wanted to see if those features could be caught ahead of
-time with simple geometry checks instead of finding out after a failed
-print.
+Both of these can be detected directly from mesh geometry without
+running an actual print.
 
-## How it was tested
+## Method
 
-I built two test shapes with a known failure point built into each one
-on purpose, so I would have a way to check whether the scanner actually
-finds the right spot instead of just producing a number that looks
-reasonable.
+1. Load a 3D mesh (STL format) and confirm it is watertight, meaning it
+   has no holes or gaps that would break a slicing operation.
+2. Slice the mesh into evenly spaced horizontal layers, 0.5 millimeters
+   apart, using ray intersection against the mesh surface, the same
+   basic operation a printer's own slicer performs before generating a
+   print path.
+3. For each layer, compute:
+   - cross sectional area, and the ratio of that area against the
+     layer directly below it
+   - the maximum radial distance from the layer's centroid to its
+     outer edge, and how much that distance grows compared to the
+     layer below
+4. Normalize both signals to a zero to one scale and combine them into
+   one composite risk score per layer, weighted equally.
+5. Map the score back onto the full resolution mesh (after subdividing
+   it for finer detail) and render it as a color heatmap, red for high
+   risk, green for low risk.
 
-**Part one:** a wide base, a thin neck, and a wide cap sitting on top of
-the neck. The scanner correctly flagged the exact layer where the neck
-meets the cap, both from the area jump check and the overhang check
-independently.
+## Results
 
-**Part two:** a tall post with an arm sticking out sideways partway up.
-The scanner correctly flagged the layer where the arm starts, right
-where it has nothing supporting it from below.
+Two synthetic parts were built with a known, deliberate failure point
+each, so the scanner's output could be checked against ground truth
+rather than trusted blindly.
 
-Same code, two different shapes, two different failure patterns, both
-caught in the right place with no manual tuning between runs.
+| Test part | Total layers | Peak risk height (mm) | Peak risk score | Layers above 0.5 risk |
+|---|---|---|---|---|
+| Neck to cap overhang part | 65 | 25.0 | 1.0 | 1 |
+| Cantilever arm part | 59 | 24.0 | 0.5 | 0 |
 
-## What is in this repo
+**Part one** had a wide base, a thin neck, and a wide cap sitting on top
+of the neck starting at height 25mm. The scanner's highest risk layer
+landed at exactly 25.0mm, matching the known failure point, and both
+the area jump signal and the overhang signal independently agreed on
+that location.
 
-- `print_risk_scanner.ipynb`, the full notebook, runs start to finish in
-  Google Colab with no setup beyond the first cell
-- `test_part.stl`, the neck and overhang cap test geometry
-- `cantilever_part.stl`, the cantilever arm test geometry
+**Part two** had a tall post with an arm beginning to extend sideways
+at height 24mm. The scanner's highest risk layer landed at 24.0mm,
+again matching the known failure point.
+
+Two different shapes, two different failure patterns, same code, no
+manual tuning between runs, both caught at the correct location.
+
+## Deliverables
+
+- `print_risk_scanner.ipynb`, the complete notebook, runs top to bottom
+  in Google Colab with no external setup
+- `test_part.stl` and `cantilever_part.stl`, the two validation
+  geometries referenced in the results above
+- A reusable `analyze_print_risk()` function that takes any mesh and
+  returns per layer risk data, ready to run against new geometry
+- An upload cell in the notebook for testing arbitrary STL files beyond
+  the two included here
+
+## Why this is useful
+
+Catching a likely failure point before printing means less wasted
+material, less wasted machine time, and faster iteration on part
+design or orientation. A tool like this could sit ahead of a print
+queue as an automatic check, or be used by a designer during CAD work
+to catch problem geometry before it ever reaches a printer.
 
 ## How to run it
 
-Open the notebook in Google Colab, run the cells in order from the top.
-The notebook also includes a cell that lets you upload your own STL file
-and run the same analysis on it.
+Open `print_risk_scanner.ipynb` in Google Colab and run the cells in
+order from the top. The final cells let you upload your own STL and
+run the same analysis on it.
 
-## What it uses
+## Built with
 
-Python, trimesh for mesh slicing and geometry, matplotlib for the 3D
-visualizations, pandas for the summary table, networkx as a placeholder
-for future topology based checks like detecting isolated thin features.
+Python, trimesh for mesh loading and slicing, matplotlib for the 3D
+risk visualizations, pandas for the summary table, networkx included
+as groundwork for future topology based checks, such as automatically
+detecting thin necks or isolated islands using graph connectivity
+rather than fixed thresholds.
 
 ## Possible next steps
 
-Testing against real printed parts to see how well the risk score
-actually predicts failure rate, adding a thermal shrinkage estimate for
-resin based printing, and turning the geometry checks into a proper
-design of experiments study across orientation and support settings.
+Testing against real printed parts to see how well the composite risk
+score actually predicts observed failure rate, adding a thermal
+shrinkage estimate to catch warping caused by uneven curing rather than
+just geometry, and running a proper design of experiments across print
+orientation and support density to see which variables move the risk
+score the most.
